@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { AnalysisResult } from '../lib/mockData';
 
 interface ArchDiagramProps {
@@ -31,7 +31,7 @@ const LAYER_COLORS: Record<string, string> = {
   lib: '#f97316',
   types: '#06b6d4',
   api: '#ef4444',
-  tests: '#6b7280',
+  tests: '#64748b',
   public: '#eab308',
   styles: '#ec4899',
 };
@@ -75,6 +75,8 @@ function getLayerForDir(dir: string): string {
 }
 
 export default function ArchDiagram({ analysis }: ArchDiagramProps) {
+  const [hoveredModule, setHoveredModule] = useState<string | null>(null);
+
   const { modules, connections } = useMemo(() => {
     // Group directories into logical modules
     const dirGroups: Record<string, { dirs: Set<string>; files: string[]; layer: string }> = {};
@@ -99,9 +101,9 @@ export default function ArchDiagram({ analysis }: ArchDiagramProps) {
     const boxPadding = 24;
     const colCount = 3;
     const colWidth = (svgWidth - boxPadding * 2) / colCount;
-    const boxWidth = colWidth - 20;
-    const boxHeight = 80;
-    const rowGap = 24;
+    const boxWidth = colWidth - 24;
+    const boxHeight = 88;
+    const rowGap = 28;
     const startY = 40;
 
     const mods: ModuleBox[] = sortedLayers.map((layer, i) => {
@@ -112,11 +114,11 @@ export default function ArchDiagram({ analysis }: ArchDiagramProps) {
         id: layer,
         label: layer.charAt(0).toUpperCase() + layer.slice(1),
         fileCount: group.files.length,
-        x: boxPadding + col * colWidth + 10,
+        x: boxPadding + col * colWidth + 12,
         y: startY + row * (boxHeight + rowGap),
         width: boxWidth,
         height: boxHeight,
-        color: LAYER_COLORS[layer] ?? '#6b7280',
+        color: LAYER_COLORS[layer] ?? '#64748b',
         layer,
       };
     });
@@ -126,14 +128,16 @@ export default function ArchDiagram({ analysis }: ArchDiagramProps) {
     const conns: Connection[] = [];
     for (const [from, to] of LAYER_CONNECTIONS) {
       if (existingLayers.has(from) && existingLayers.has(to)) {
-        conns.push({ from, to, strength: 1 + Math.floor(Math.random() * 4) });
+        // Deterministic strength based on layer name hash
+        const hash = (from.length * 7 + to.length * 13) % 4;
+        conns.push({ from, to, strength: 1 + hash });
       }
     }
 
     return { modules: mods, connections: conns };
   }, [analysis]);
 
-  const svgHeight = Math.max(500, Math.ceil(modules.length / 3) * 104 + 80);
+  const svgHeight = Math.max(500, Math.ceil(modules.length / 3) * 116 + 80);
 
   const getModuleCenter = (id: string) => {
     const mod = modules.find(m => m.id === id);
@@ -145,7 +149,7 @@ export default function ArchDiagram({ analysis }: ArchDiagramProps) {
     <div className="arch-diagram">
       <h2>Architecture Diagram</h2>
       <p className="subtitle">
-        Module structure of <strong>{analysis.projectName}</strong> --
+        Module structure of <strong>{analysis.projectName}</strong> --{' '}
         {modules.length} logical modules, {analysis.totalFiles} files
       </p>
 
@@ -163,79 +167,138 @@ export default function ArchDiagram({ analysis }: ArchDiagramProps) {
             refY="3"
             orient="auto"
           >
-            <polygon points="0 0, 8 3, 0 6" fill="var(--text-muted)" opacity="0.5" />
+            <polygon points="0 0, 8 3, 0 6" fill="var(--text-muted)" opacity="0.4" />
           </marker>
+          {/* Glow filter for hovered modules */}
+          <filter id="moduleGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="6" result="blur" />
+            <feFlood floodColor="var(--accent)" floodOpacity="0.15" result="color" />
+            <feComposite in="color" in2="blur" operator="in" result="glow" />
+            <feMerge>
+              <feMergeNode in="glow" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
         </defs>
 
         {/* Connections */}
         {connections.map((conn, i) => {
           const from = getModuleCenter(conn.from);
           const to = getModuleCenter(conn.to);
+          const isHighlighted = hoveredModule === conn.from || hoveredModule === conn.to;
+          // Calculate control point for curved connection
+          const midX = (from.x + to.x) / 2;
+          const midY = (from.y + to.y) / 2;
+          const dx = to.x - from.x;
+          const dy = to.y - from.y;
+          const offset = 20;
+          const cx = midX - dy * offset / Math.sqrt(dx * dx + dy * dy + 1);
+          const cy = midY + dx * offset / Math.sqrt(dx * dx + dy * dy + 1);
           return (
-            <line
+            <path
               key={i}
-              x1={from.x}
-              y1={from.y}
-              x2={to.x}
-              y2={to.y}
-              stroke="var(--border-secondary)"
-              strokeWidth={conn.strength * 0.5}
-              strokeOpacity={0.4}
+              d={`M ${from.x} ${from.y} Q ${cx} ${cy} ${to.x} ${to.y}`}
+              fill="none"
+              stroke={isHighlighted ? 'var(--accent)' : 'var(--border-secondary)'}
+              strokeWidth={isHighlighted ? 1.5 : 0.8}
+              strokeOpacity={isHighlighted ? 0.6 : 0.25}
               markerEnd="url(#arrowhead)"
             />
           );
         })}
 
         {/* Module boxes */}
-        {modules.map((mod) => (
-          <g key={mod.id}>
-            <rect
-              x={mod.x}
-              y={mod.y}
-              width={mod.width}
-              height={mod.height}
-              rx={8}
-              fill={mod.color}
-              fillOpacity={0.12}
-              stroke={mod.color}
-              strokeWidth={1.5}
-              strokeOpacity={0.5}
-            />
-            <text
-              x={mod.x + 14}
-              y={mod.y + 28}
-              fill={mod.color}
-              fontSize={15}
-              fontWeight={600}
+        {modules.map((mod) => {
+          const isHovered = hoveredModule === mod.id;
+          return (
+            <g
+              key={mod.id}
+              onMouseEnter={() => setHoveredModule(mod.id)}
+              onMouseLeave={() => setHoveredModule(null)}
+              style={{ cursor: 'pointer' }}
+              filter={isHovered ? 'url(#moduleGlow)' : undefined}
             >
-              {mod.label}
-            </text>
-            <text
-              x={mod.x + 14}
-              y={mod.y + 50}
-              fill="var(--text-secondary)"
-              fontSize={12}
-            >
-              {mod.fileCount} files
-            </text>
-            {/* File count indicator dots */}
-            {Array.from({ length: Math.min(mod.fileCount, 10) }, (_, j) => (
-              <circle
-                key={j}
-                cx={mod.x + 14 + j * 10}
-                cy={mod.y + 65}
-                r={3}
+              {/* Background fill */}
+              <rect
+                x={mod.x}
+                y={mod.y}
+                width={mod.width}
+                height={mod.height}
+                rx={10}
                 fill={mod.color}
-                fillOpacity={0.5}
+                fillOpacity={isHovered ? 0.15 : 0.08}
+                stroke={mod.color}
+                strokeWidth={isHovered ? 2 : 1.5}
+                strokeOpacity={isHovered ? 0.8 : 0.35}
               />
-            ))}
-          </g>
-        ))}
+              {/* Top accent bar */}
+              <rect
+                x={mod.x + 1}
+                y={mod.y + 1}
+                width={mod.width - 2}
+                height={3}
+                rx={2}
+                fill={mod.color}
+                fillOpacity={isHovered ? 0.5 : 0.25}
+              />
+              {/* Label */}
+              <text
+                x={mod.x + 16}
+                y={mod.y + 30}
+                fill={isHovered ? '#fff' : mod.color}
+                fontSize={15}
+                fontWeight={600}
+                fontFamily="var(--font-sans)"
+              >
+                {mod.label}
+              </text>
+              {/* File count */}
+              <text
+                x={mod.x + 16}
+                y={mod.y + 50}
+                fill="var(--text-secondary)"
+                fontSize={12}
+                fontFamily="var(--font-sans)"
+              >
+                {mod.fileCount} file{mod.fileCount !== 1 ? 's' : ''}
+              </text>
+              {/* Mini bar chart showing relative file count */}
+              <rect
+                x={mod.x + 16}
+                y={mod.y + 62}
+                width={Math.min(mod.width - 32, mod.fileCount * 6)}
+                height={4}
+                rx={2}
+                fill={mod.color}
+                fillOpacity={isHovered ? 0.6 : 0.35}
+              />
+              <rect
+                x={mod.x + 16}
+                y={mod.y + 62}
+                width={mod.width - 32}
+                height={4}
+                rx={2}
+                fill={mod.color}
+                fillOpacity={0.08}
+              />
+            </g>
+          );
+        })}
       </svg>
 
       <div className="arch-legend">
         {modules.map((mod) => (
-          <div key={mod.id} className="arch-legend-item">
+          <div
+            key={mod.id}
+            className="arch-legend-item"
+            onMouseEnter={() => setHoveredModule(mod.id)}
+            onMouseLeave={() => setHoveredModule(null)}
+            style={{
+              cursor: 'pointer',
+              opacity: hoveredModule && hoveredModule !== mod.id ? 0.5 : 1,
+              transition: 'opacity 0.15s',
+            }}
+          >
             <div className="swatch" style={{ background: mod.color }} />
             {mod.label}
           </div>

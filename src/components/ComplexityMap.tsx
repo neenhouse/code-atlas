@@ -21,11 +21,13 @@ interface TooltipData {
 }
 
 function complexityToColor(complexity: number): string {
-  if (complexity <= 20) return '#22c55e';
-  if (complexity <= 40) return '#84cc16';
+  if (complexity <= 15) return '#22c55e';
+  if (complexity <= 30) return '#4ade80';
+  if (complexity <= 45) return '#a3e635';
   if (complexity <= 60) return '#eab308';
-  if (complexity <= 80) return '#f97316';
-  return '#ef4444';
+  if (complexity <= 75) return '#f97316';
+  if (complexity <= 90) return '#ef4444';
+  return '#dc2626';
 }
 
 function complexityLabel(complexity: number): string {
@@ -102,13 +104,24 @@ export default function ComplexityMap({ analysis }: ComplexityMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
 
-  const rects = useMemo(() => {
+  const { rects, stats } = useMemo(() => {
     const sourceFiles = analysis.files.filter(f => !f.path.includes('test'));
-    return layoutTreemap(sourceFiles, 0, 0, 100, 100);
+    const avgComplexity = sourceFiles.length > 0
+      ? sourceFiles.reduce((sum, f) => sum + f.complexity, 0) / sourceFiles.length
+      : 0;
+    const hotspots = sourceFiles.filter(f => f.complexity >= 60).length;
+    return {
+      rects: layoutTreemap(sourceFiles, 0, 0, 100, 100),
+      stats: {
+        avgComplexity: Math.round(avgComplexity),
+        hotspots,
+        totalFiles: sourceFiles.length,
+      },
+    };
   }, [analysis]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent, file: FileEntry) => {
-    setTooltip({ file, x: e.clientX + 12, y: e.clientY - 10 });
+    setTooltip({ file, x: e.clientX + 14, y: e.clientY - 10 });
   }, []);
 
   const handleMouseLeave = useCallback(() => {
@@ -120,7 +133,14 @@ export default function ComplexityMap({ analysis }: ComplexityMapProps) {
       <h2>Complexity Heatmap</h2>
       <p className="subtitle">
         File sizes as area, complexity as color intensity.
-        Hover for details. Red = high complexity, green = simple.
+        Hover for details.{' '}
+        <span style={{ color: 'var(--viz-red)' }}>Red</span> = high complexity,{' '}
+        <span style={{ color: 'var(--viz-green)' }}>green</span> = simple.
+        {stats.hotspots > 0 && (
+          <span style={{ marginLeft: 8, color: 'var(--viz-orange)' }}>
+            {stats.hotspots} hotspot{stats.hotspots !== 1 ? 's' : ''} detected
+          </span>
+        )}
       </p>
 
       <div
@@ -186,8 +206,9 @@ export default function ComplexityMap({ analysis }: ComplexityMapProps) {
         <span>Simple</span>
         <div className="heatmap-gradient" />
         <span>Complex</span>
-        <span style={{ marginLeft: 16 }}>
-          {analysis.files.length} files, {analysis.totalLines.toLocaleString()} LOC
+        <span style={{ marginLeft: 16, color: 'var(--text-muted)' }}>
+          {stats.totalFiles} files, {analysis.totalLines.toLocaleString()} LOC,{' '}
+          avg complexity {stats.avgComplexity}/100
         </span>
       </div>
     </div>

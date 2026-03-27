@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import type { AnalysisResult, DependencyEntry } from '../lib/mockData';
 
 interface DepGraphProps {
@@ -12,10 +12,16 @@ interface NodePosition {
   radius: number;
 }
 
+interface TooltipState {
+  dep: DependencyEntry;
+  x: number;
+  y: number;
+}
+
 const CATEGORY_COLORS: Record<string, string> = {
   framework: '#3b82f6',
   utility: '#22c55e',
-  dev: '#6b7280',
+  dev: '#64748b',
   styling: '#a855f7',
   testing: '#f97316',
 };
@@ -31,6 +37,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 export default function DepGraph({ analysis }: DepGraphProps) {
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const [filter, setFilter] = useState<string>('all');
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null);
 
   const { nodes, categoryGroups } = useMemo(() => {
     const deps = filter === 'all'
@@ -59,8 +66,8 @@ export default function DepGraph({ analysis }: DepGraphProps) {
         const spreadRadius = 40 + catDeps.length * 8;
         const x = catCenterX + Math.cos(depAngle) * spreadRadius;
         const y = catCenterY + Math.sin(depAngle) * spreadRadius;
-        const minRadius = 12;
-        const maxRadius = 36;
+        const minRadius = 14;
+        const maxRadius = 38;
         const sizeNorm = Math.min(1, dep.estimatedSize / 8000);
         const radius = minRadius + sizeNorm * (maxRadius - minRadius);
 
@@ -78,6 +85,16 @@ export default function DepGraph({ analysis }: DepGraphProps) {
     return { nodes: positions, categoryGroups: groups };
   }, [analysis, filter]);
 
+  const handleNodeMouseMove = useCallback((e: React.MouseEvent, dep: DependencyEntry) => {
+    setHoveredNode(dep.name);
+    setTooltip({ dep, x: e.clientX + 14, y: e.clientY - 10 });
+  }, []);
+
+  const handleNodeMouseLeave = useCallback(() => {
+    setHoveredNode(null);
+    setTooltip(null);
+  }, []);
+
   const svgWidth = 700;
   const svgHeight = 500;
 
@@ -89,7 +106,7 @@ export default function DepGraph({ analysis }: DepGraphProps) {
         sized by install footprint, colored by category
       </p>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+      <div className="dep-filter-bar">
         <button
           className={`btn btn-sm ${filter === 'all' ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => setFilter('all')}
@@ -101,7 +118,17 @@ export default function DepGraph({ analysis }: DepGraphProps) {
             key={cat}
             className={`btn btn-sm ${filter === cat ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setFilter(cat)}
+            style={filter === cat ? { background: CATEGORY_COLORS[cat] } : undefined}
           >
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: CATEGORY_COLORS[cat],
+                display: filter === cat ? 'none' : 'inline-block',
+              }}
+            />
             {CATEGORY_LABELS[cat]}
           </button>
         ))}
@@ -114,15 +141,31 @@ export default function DepGraph({ analysis }: DepGraphProps) {
             preserveAspectRatio="xMidYMid meet"
             style={{ width: '100%', height: '100%' }}
           >
+            <defs>
+              <radialGradient id="centerGlow">
+                <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.15" />
+                <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+              </radialGradient>
+            </defs>
+
+            {/* Center glow */}
+            <circle
+              cx={svgWidth / 2}
+              cy={svgHeight / 2}
+              r={60}
+              fill="url(#centerGlow)"
+            />
+
             {/* Center project node */}
             <circle
               cx={svgWidth / 2}
               cy={svgHeight / 2}
-              r={24}
+              r={26}
               fill="var(--accent)"
-              fillOpacity={0.2}
+              fillOpacity={0.15}
               stroke="var(--accent)"
               strokeWidth={2}
+              strokeOpacity={0.6}
             />
             <text
               x={svgWidth / 2}
@@ -131,6 +174,7 @@ export default function DepGraph({ analysis }: DepGraphProps) {
               fill="var(--accent-light)"
               fontSize={10}
               fontWeight={600}
+              fontFamily="var(--font-sans)"
             >
               {analysis.projectName.length > 12
                 ? analysis.projectName.slice(0, 12) + '...'
@@ -138,39 +182,55 @@ export default function DepGraph({ analysis }: DepGraphProps) {
             </text>
 
             {/* Edges from center to nodes */}
-            {nodes.map((node) => (
-              <line
-                key={`edge-${node.dep.name}`}
-                x1={svgWidth / 2}
-                y1={svgHeight / 2}
-                x2={node.x}
-                y2={node.y}
-                stroke={CATEGORY_COLORS[node.dep.category] ?? '#6b7280'}
-                strokeWidth={hoveredNode === node.dep.name ? 2 : 0.5}
-                strokeOpacity={hoveredNode === node.dep.name ? 0.8 : 0.2}
-              />
-            ))}
+            {nodes.map((node) => {
+              const isHovered = hoveredNode === node.dep.name;
+              return (
+                <line
+                  key={`edge-${node.dep.name}`}
+                  x1={svgWidth / 2}
+                  y1={svgHeight / 2}
+                  x2={node.x}
+                  y2={node.y}
+                  stroke={CATEGORY_COLORS[node.dep.category] ?? '#64748b'}
+                  strokeWidth={isHovered ? 2 : 0.5}
+                  strokeOpacity={isHovered ? 0.7 : 0.15}
+                  strokeDasharray={isHovered ? 'none' : '2 3'}
+                />
+              );
+            })}
 
             {/* Dependency nodes */}
             {nodes.map((node) => {
               const isHovered = hoveredNode === node.dep.name;
-              const color = CATEGORY_COLORS[node.dep.category] ?? '#6b7280';
+              const color = CATEGORY_COLORS[node.dep.category] ?? '#64748b';
               return (
                 <g
                   key={node.dep.name}
-                  onMouseEnter={() => setHoveredNode(node.dep.name)}
-                  onMouseLeave={() => setHoveredNode(null)}
+                  onMouseMove={(e) => handleNodeMouseMove(e, node.dep)}
+                  onMouseLeave={handleNodeMouseLeave}
                   style={{ cursor: 'pointer' }}
                 >
+                  {/* Glow ring on hover */}
+                  {isHovered && (
+                    <circle
+                      cx={node.x}
+                      cy={node.y}
+                      r={node.radius + 6}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth={1}
+                      strokeOpacity={0.3}
+                    />
+                  )}
                   <circle
                     cx={node.x}
                     cy={node.y}
                     r={node.radius}
                     fill={color}
-                    fillOpacity={isHovered ? 0.4 : 0.15}
+                    fillOpacity={isHovered ? 0.35 : 0.12}
                     stroke={color}
                     strokeWidth={isHovered ? 2 : 1}
-                    strokeOpacity={isHovered ? 1 : 0.5}
+                    strokeOpacity={isHovered ? 1 : 0.4}
                   />
                   {node.dep.isOutdated && (
                     <circle
@@ -178,6 +238,8 @@ export default function DepGraph({ analysis }: DepGraphProps) {
                       cy={node.y - node.radius * 0.6}
                       r={4}
                       fill="var(--viz-yellow)"
+                      stroke="var(--bg-surface)"
+                      strokeWidth={1.5}
                     />
                   )}
                   <text
@@ -185,22 +247,12 @@ export default function DepGraph({ analysis }: DepGraphProps) {
                     y={node.y + 3}
                     textAnchor="middle"
                     fill={isHovered ? 'var(--text-primary)' : color}
-                    fontSize={node.radius > 20 ? 10 : 8}
+                    fontSize={node.radius > 22 ? 10 : 8}
                     fontWeight={isHovered ? 600 : 400}
+                    fontFamily="var(--font-sans)"
                   >
                     {node.dep.name.replace(/^@.*\//, '').slice(0, 10)}
                   </text>
-                  {isHovered && (
-                    <text
-                      x={node.x}
-                      y={node.y + 16}
-                      textAnchor="middle"
-                      fill="var(--text-secondary)"
-                      fontSize={9}
-                    >
-                      {node.dep.version} / {(node.dep.estimatedSize / 1000).toFixed(1)}MB
-                    </text>
-                  )}
                 </g>
               );
             })}
@@ -222,7 +274,7 @@ export default function DepGraph({ analysis }: DepGraphProps) {
                   <li
                     key={dep.name}
                     onMouseEnter={() => setHoveredNode(dep.name)}
-                    onMouseLeave={() => setHoveredNode(null)}
+                    onMouseLeave={() => { setHoveredNode(null); setTooltip(null); }}
                     style={{
                       background: hoveredNode === dep.name ? 'var(--bg-hover)' : 'transparent',
                       cursor: 'pointer',
@@ -240,6 +292,43 @@ export default function DepGraph({ analysis }: DepGraphProps) {
           ))}
         </div>
       </div>
+
+      {/* Floating tooltip for graph nodes */}
+      {tooltip && (
+        <div
+          className="dep-tooltip"
+          style={{ left: tooltip.x, top: tooltip.y }}
+        >
+          <div className="tt-name">
+            <span className="dot" style={{ background: CATEGORY_COLORS[tooltip.dep.category] }} />
+            {tooltip.dep.name}
+          </div>
+          <div className="tt-row">
+            <span>Version</span>
+            <span className="tt-value">{tooltip.dep.version}</span>
+          </div>
+          <div className="tt-row">
+            <span>Category</span>
+            <span className="tt-value">{CATEGORY_LABELS[tooltip.dep.category]}</span>
+          </div>
+          <div className="tt-row">
+            <span>Size</span>
+            <span className="tt-value">{(tooltip.dep.estimatedSize / 1000).toFixed(1)} MB</span>
+          </div>
+          {tooltip.dep.isOutdated && (
+            <div className="tt-row" style={{ color: 'var(--viz-yellow)' }}>
+              <span>Status</span>
+              <span style={{ color: 'var(--viz-yellow)', fontWeight: 600 }}>Outdated</span>
+            </div>
+          )}
+          {tooltip.dep.isDev && (
+            <div className="tt-row">
+              <span>Type</span>
+              <span className="tt-value">devDependency</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
